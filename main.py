@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from src.chunking import RecursiveChunker, SentenceChunker
 
 from dotenv import load_dotenv
 
@@ -19,12 +20,8 @@ from src.models import Document
 from src.store import EmbeddingStore
 
 SAMPLE_FILES = [
-    "data/python_intro.txt",
-    "data/vector_store_notes.md",
-    "data/rag_system_design.md",
-    "data/customer_support_playbook.txt",
-    "data/chunking_experiment_report.md",
-    "data/vi_retrieval_notes.md",
+
+    "data/data.md"
 ]
 
 
@@ -56,6 +53,25 @@ def load_documents_from_files(file_paths: list[str]) -> list[Document]:
     return documents
 
 
+def chunk_documents(documents: list[Document], chunker=None) -> list[Document]:
+    """Cắt nhỏ các documents gốc thành các chunks."""
+    if chunker is None:
+        chunker = SentenceChunker(max_sentences_per_chunk=2)
+    
+    chunked_docs: list[Document] = []
+    
+    for doc in documents:
+        chunks = chunker.chunk(doc.content)
+        for i, chunk_text in enumerate(chunks):
+            new_id = f"{doc.id}-chunk-{i}"
+            new_meta = doc.metadata.copy()
+            new_meta["chunk_index"] = i
+            new_meta["doc_id"] = doc.id
+            chunked_docs.append(Document(id=new_id, content=chunk_text, metadata=new_meta))
+            
+    return chunked_docs
+
+
 def demo_llm(prompt: str) -> str:
     """A simple mock LLM for manual RAG testing."""
     preview = prompt[:400].replace("\n", " ")
@@ -64,7 +80,7 @@ def demo_llm(prompt: str) -> str:
 
 def run_manual_demo(question: str | None = None, sample_files: list[str] | None = None) -> int:
     files = sample_files or SAMPLE_FILES
-    query = question or "Summarize the key information from the loaded files."
+    query = question or "."
 
     print("=== Manual File Test ===")
     print("Accepted file types: .md, .txt")
@@ -82,6 +98,9 @@ def run_manual_demo(question: str | None = None, sample_files: list[str] | None 
     print(f"\nLoaded {len(docs)} documents")
     for doc in docs:
         print(f"  - {doc.id}: {doc.metadata['source']}")
+
+    docs = chunk_documents(docs)
+    print(f"Băm thành công: Tạo ra {len(docs)} chunks để lưu vào vector database.")
 
     load_dotenv(override=False)
     provider = os.getenv(EMBEDDING_PROVIDER_ENV, "mock").strip().lower()
@@ -106,7 +125,7 @@ def run_manual_demo(question: str | None = None, sample_files: list[str] | None 
     print(f"\nStored {store.get_collection_size()} documents in EmbeddingStore")
     print("\n=== EmbeddingStore Search Test ===")
     print(f"Query: {query}")
-    search_results = store.search(query, top_k=3)
+    search_results = store.search(query, top_k=5)
     for index, result in enumerate(search_results, start=1):
         print(f"{index}. score={result['score']:.3f} source={result['metadata'].get('source')}")
         print(f"   content preview: {result['content'][:120].replace(chr(10), ' ')}...")
@@ -115,12 +134,12 @@ def run_manual_demo(question: str | None = None, sample_files: list[str] | None 
     agent = KnowledgeBaseAgent(store=store, llm_fn=demo_llm)
     print(f"Question: {query}")
     print("Agent answer:")
-    print(agent.answer(query, top_k=3))
+    print(agent.answer(query, top_k=5))
     return 0
 
 
 def main() -> int:
-    question = " ".join(sys.argv[1:]).strip() if len(sys.argv) > 1 else None
+    question = "Một tín chỉ tương đương bao nhiêu giờ học ".join(sys.argv[1:]).strip() if len(sys.argv) > 1 else None
     return run_manual_demo(question=question)
 
 
